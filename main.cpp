@@ -3,690 +3,479 @@
 //////////////////////////////////////////
 //                                      //
 // Учебные приложения по графике OpenGL //
-// Труба с диалогом свойств             //
-//                                      //
-//        (с) РУТ(МИИТ), каф.САП        //
+// Цилиндр и тор. Метод концентрических //
+// сфер                                //
 //                                      //
 //////////////////////////////////////////
 
-
 #define STRICT
-#define _CRT_NON_CONFORMING_SWPRINTFS
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <windows.h>
-#include <windowsx.h>
-#include <commctrl.h>
-
-#include <stdio.h>
+#include <tchar.h>
 #include <math.h>
 #include <assert.h>
-#include <tchar.h>
 
-#include <gl\\gl.h>
-#include <gl\\glu.h>
+#include <gl\gl.h>
+#include <gl\glu.h>
 
+#pragma comment(linker, "/defaultlib:opengl32.lib")
+#pragma comment(linker, "/defaultlib:glu32.lib")
 
-#pragma comment (linker, "/defaultlib:opengl32.lib")
-#pragma comment (linker, "/defaultlib:glu32.lib")
-
-#include "resource.h"
-
-#ifndef _countof
-#define _countof(a) (sizeof(a) / sizeof(a[0]))
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
 #endif
 
 HINSTANCE g_hApp = nullptr;
-LPCTSTR g_szAppName = _T("Восьмиугольная труба с диалогом свойств");
+LPCTSTR g_szAppName = _T("Цилиндр и тор. Метод концентрических сфер");
+LPCTSTR g_szWndClass = _T("WcOglCylinderTorusSpheres");
 
 HWND g_hWindow = nullptr;
 HDC g_hDC = nullptr;
 HGLRC g_hGLRC = nullptr;
-LPCTSTR g_szWndClass = _T("WcOglBoxpipe"),
-g_szTitle = g_szAppName;
-
-int g_wndWidth = -1, g_wndHeight = -1;
-
-double g_angle = 0;
-const double g_angIncr = 1;
-
 GLUquadricObj* g_pGluQuadObj = nullptr;
 
-#define M_PI 3.1415926
+int g_wndWidth = 1000;
+int g_wndHeight = 700;
+bool g_showAuxiliarySpheres = true;
+bool g_isLeftMouseDown = false;
+POINT g_lastMousePos = { 0, 0 };
 
+double g_cameraYaw = -38.0;
+double g_cameraPitch = 24.0;
+double g_cameraDistance = 30.0;
 
-//
-// свойства
-//
-
-struct Color
-{
-	LPCTSTR szName;
-	COLORREF value;
-
-	Color() : szName(_T("")), value(0) {}
-	Color(LPCTSTR szName_, COLORREF value_) : szName(szName_), value(value_) {}
-};
-
-Color g_colors[] =
-{
-	Color(_T("- Красный"), RGB(255, 0,   0)),
-	Color(_T("- Зелёный"), RGB(0,   255, 0)),
-	Color(_T("- Жёлтый"),  RGB(255, 255, 0)),
-};
-
-struct BoxpipeProps
-{
-	double W, H, T, L, C;
-	int iColor;
-
-	BoxpipeProps() : W(15.), H(10.), T(1.), L(30.), C(3.), iColor(0) {}
-
-	void CorrectValues()
-	{
-		if (W < 1e-5) W = 1e-5;
-		if (H < 1e-5) H = 1e-5;
-		if (L < 1e-5) L = 1e-5;
-		if (T < 1e-5) T = 1e-5;
-		if (T * 2 > W) T = W / 2;
-		if (T * 2 > H) T = H / 2;
-
-		double maxC = min(W / 2 - T, H / 2 - T);
-		if (C < 1e-5) C = 1e-5;
-		if (C > maxC)  C = maxC;
-
-		if (iColor < 0 || iColor >= _countof(g_colors))
-			iColor = 0;
-	}
-};
-
-BoxpipeProps g_boxpipeProps;
-
-
-// размер сцены
-double g_sceneWidth = 50.;
-
+const double g_torusMajorRadius = 7.0;
+const double g_torusMinorRadius = 2.45;
+const double g_cylinderRadius = 2.85;
+const double g_cylinderLength = 20.0;
+const double g_cylinderOffsetZ = g_torusMajorRadius + 0.3;
 
 LRESULT CALLBACK MainWindowProc(HWND, UINT, WPARAM, LPARAM);
-BOOL MainOnCreate(HWND, LPCREATESTRUCT);
-BOOL MainOnCommand(int, HWND, UINT);
-BOOL MainOnSize(int width, int height);
-BOOL MainOnPaint();
-BOOL MainOnSize(UINT, int, int);
-BOOL MainOnDestroy();
+BOOL InitApp();
+void UninitApp();
+void Draw();
 
-INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+double Clamp(double value, double minValue, double maxValue)
+{
+	if (value < minValue)
+		return minValue;
+	if (value > maxValue)
+		return maxValue;
+	return value;
+}
 
-BOOL InitApp(void);
-void UninitApp(void);
-
-int APIENTRY WinMain(HINSTANCE, HINSTANCE, LPSTR, int);
-
-
-// установка формата пикселей
-BOOL SetPixelFormat(HDC dc)
+BOOL SetupPixelFormat(HDC dc)
 {
 	PIXELFORMATDESCRIPTOR pfd;
+	ZeroMemory(&pfd, sizeof(pfd));
 
-	ZeroMemory(&pfd, sizeof(PIXELFORMATDESCRIPTOR));
-
-	pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+	pfd.nSize = sizeof(pfd);
 	pfd.nVersion = 1;
 	pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
 	pfd.iPixelType = PFD_TYPE_RGBA;
 	pfd.cColorBits = 24;
-	pfd.cAlphaBits = 24;
-	pfd.cStencilBits = 8;
 	pfd.cDepthBits = 24;
-	pfd.cAccumBits = 0;
+	pfd.cStencilBits = 8;
 	pfd.iLayerType = PFD_MAIN_PLANE;
 
 	int pf = ChoosePixelFormat(dc, &pfd);
-	SetPixelFormat(dc, pf, &pfd);
+	if (!pf)
+		return FALSE;
 
-	return !(pfd.dwFlags & PFD_NEED_PALETTE);
-}  //SetPixelFormat
-
-//
-// рисование трубы (восьмиугольное сечение)
-//
-void DrawBoxpipe(bool fFill = true)
-{
-	float r = GetRValue(g_colors[g_boxpipeProps.iColor].value) / 255.f / 2,
-		g = GetGValue(g_colors[g_boxpipeProps.iColor].value) / 255.f / 2,
-		b = GetBValue(g_colors[g_boxpipeProps.iColor].value) / 255.f / 2;
-
-	double w = g_boxpipeProps.W / 2,
-		h = g_boxpipeProps.H / 2,
-		l = g_boxpipeProps.L / 2,
-		t = g_boxpipeProps.T,
-		c = g_boxpipeProps.C;
-
-	double w1 = w - t,
-		h1 = h - t,
-		c1 = c;
-
-	const int N = 8;
-
-	// Внешний контур
-	double ox[N] = {w - c,  w,      w,      w, -w + c, -w,     -w,     -w};
-	double oy[N] = {h,      h,      -h + c, -h, -h,     -h,      h - c,  h};
-
-	// Внутренний восьмиугольник
-	double ix[N] = { w1 - c1,  w1,       w1,       w1 - c1, -w1 + c1, -w1,      -w1,      -w1 + c1 };
-	double iy[N] = { h1,       h1 - c1, -h1 + c1, -h1,      -h1,      -h1 + c1,  h1 - c1,  h1 };
-
-	glEnable(GL_DEPTH_TEST);
-
-	glPolygonMode(GL_FRONT_AND_BACK, fFill ? GL_FILL : GL_LINE);
-
-	// Внешние боковые грани
-	glBegin(GL_QUADS);
-	for (int i = 0; i < N; i++)
-	{
-		int j = (i + 1) % N;
-		float br = (i % 2 == 0) ? 1.5f : 1.0f;
-		glColor3f(r * br, g * br, b * br);
-		glVertex3d(ox[i], oy[i], l);
-		glVertex3d(ox[j], oy[j], l);
-		glVertex3d(ox[j], oy[j], -l);
-		glVertex3d(ox[i], oy[i], -l);
-	}
-	glEnd();
-
-	// Внутренние боковые грани
-	glBegin(GL_QUADS);
-	for (int i = 0; i < N; i++)
-	{
-		int j = (i + 1) % N;
-		float br = (i % 2 == 0) ? 0.5f : 1.0f;
-		glColor3f(r * br, g * br, b * br);
-		glVertex3d(ix[i], iy[i], l);
-		glVertex3d(ix[i], iy[i], -l);
-		glVertex3d(ix[j], iy[j], -l);
-		glVertex3d(ix[j], iy[j], l);
-	}
-	glEnd();
-
-	// Передний торец
-	glColor3f(0.5f, 0.5f, 0.5f);
-	glBegin(GL_QUAD_STRIP);
-	for (int i = 0; i <= N; i++)
-	{
-		int k = i % N;
-		glVertex3d(ox[k], oy[k], l);
-		glVertex3d(ix[k], iy[k], l);
-	}
-	glEnd();
-
-	// Задний торец
-	glBegin(GL_QUAD_STRIP);
-	for (int i = 0; i <= N; i++)
-	{
-		int k = i % N;
-		glVertex3d(ix[k], iy[k], -l);
-		glVertex3d(ox[k], oy[k], -l);
-	}
-	glEnd();
+	return SetPixelFormat(dc, pf, &pfd);
 }
 
-
-//
-// штриховка торцевого сечения
-// zPos — позиция торца по оси Z (передний: +l, задний: -l, проекция: 0)
-//
-void DrawHatching(double zPos = 0.0)
+void SetMaterial(float r, float g, float b, float shininess)
 {
-	double w = g_boxpipeProps.W / 2,
-		h = g_boxpipeProps.H / 2,
-		t = g_boxpipeProps.T,
-		c = g_boxpipeProps.C;
+	GLfloat ambient[] = { r * 0.58f, g * 0.58f, b * 0.58f, 1.0f };
+	GLfloat diffuse[] = { r, g, b, 1.0f };
+	GLfloat specular[] = { 0.28f, 0.28f, 0.28f, 1.0f };
 
-	double w1 = w - t,
-		h1 = h - t,
-		c1 = c;
+	glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambient);
+	glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diffuse);
+	glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
+	glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess);
+}
 
-	const int N = 8;
-
-	// Внешний контур
-	double ox[N] = { w - c,  w,      w,      w, -w + c, -w,     -w,     -w };
-	double oy[N] = {h,      h,      -h + c, -h, -h,     -h,      h - c,  h};
-
-	// Внутренний восьмиугольник
-	double ix[N] = { w1 - c1,  w1,       w1,       w1 - c1, -w1 + c1, -w1,      -w1,      -w1 + c1 };
-	double iy[N] = { h1,       h1 - c1, -h1 + c1, -h1,      -h1,      -h1 + c1,  h1 - c1,  h1 };
-
-	glEnable(GL_STENCIL_TEST);
-	glClear(GL_STENCIL_BUFFER_BIT);
-
-	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-	glDepthMask(GL_FALSE);
-	glDisable(GL_DEPTH_TEST);
-
-	glStencilFunc(GL_ALWAYS, 1, 0xFF);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-
-	glBegin(GL_TRIANGLE_FAN);
-	glVertex3d(0, 0, zPos);
-	for (int i = 0; i <= N; i++)
-		glVertex3d(ox[i % N], oy[i % N], zPos);
+void DrawAxes(double size)
+{
+	glDisable(GL_LIGHTING);
+	glLineWidth(2.0f);
+	glBegin(GL_LINES);
+	glColor3d(1.0, 0.15, 0.15);
+	glVertex3d(-size, 0.0, 0.0);
+	glVertex3d(size, 0.0, 0.0);
+	glColor3d(0.1, 0.85, 0.1);
+	glVertex3d(0.0, -size, 0.0);
+	glVertex3d(0.0, size, 0.0);
+	glColor3d(0.15, 0.25, 1.0);
+	glVertex3d(0.0, 0.0, -size);
+	glVertex3d(0.0, 0.0, size);
 	glEnd();
-
-	glStencilFunc(GL_ALWAYS, 0, 0xFF);
-
-	glBegin(GL_TRIANGLE_FAN);
-	glVertex3d(0, 0, zPos);
-	for (int i = 0; i <= N; i++)
-		glVertex3d(ix[i % N], iy[i % N], zPos);
-	glEnd();
-
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glDepthMask(GL_TRUE);
-
-	glStencilFunc(GL_EQUAL, 1, 0xFF);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-
-	glColor3f(0.15f, 0.15f, 0.15f);
 	glLineWidth(1.0f);
+	glEnable(GL_LIGHTING);
+}
+
+void DrawTorus()
+{
+	const int uSteps = 96;
+	const int vSteps = 32;
+	const double R = g_torusMajorRadius;
+	const double r = g_torusMinorRadius;
+
+	SetMaterial(0.02f, 0.55f, 0.18f, 64.0f);
+
+	for (int i = 0; i < uSteps; ++i)
+	{
+		double u0 = 2.0 * M_PI * i / uSteps;
+		double u1 = 2.0 * M_PI * (i + 1) / uSteps;
+
+		glBegin(GL_QUAD_STRIP);
+		for (int j = 0; j <= vSteps; ++j)
+		{
+			double v = 2.0 * M_PI * j / vSteps;
+			double cv = cos(v);
+			double sv = sin(v);
+
+			double cu0 = cos(u0), su0 = sin(u0);
+			double cu1 = cos(u1), su1 = sin(u1);
+
+			glNormal3d(cv * cu0, sv, cv * su0);
+			glVertex3d((R + r * cv) * cu0, r * sv, (R + r * cv) * su0);
+
+			glNormal3d(cv * cu1, sv, cv * su1);
+			glVertex3d((R + r * cv) * cu1, r * sv, (R + r * cv) * su1);
+		}
+		glEnd();
+	}
+}
+
+void DrawCylinder()
+{
+	const double halfLength = g_cylinderLength / 2.0;
+
+	SetMaterial(0.55f, 0.08f, 0.05f, 42.0f);
+
+	glPushMatrix();
+	glTranslated(0.0, 0.0, g_cylinderOffsetZ);
+	glTranslated(-halfLength, 0.0, 0.0);
+	glRotated(90.0, 0.0, 1.0, 0.0);
+	gluCylinder(g_pGluQuadObj, g_cylinderRadius, g_cylinderRadius, g_cylinderLength, 64, 10);
+	gluDisk(g_pGluQuadObj, 0.0, g_cylinderRadius, 64, 1);
+	glTranslated(0.0, 0.0, g_cylinderLength);
+	gluDisk(g_pGluQuadObj, 0.0, g_cylinderRadius, 64, 1);
+	glPopMatrix();
+}
+
+void DrawAuxiliarySphere(double radius)
+{
+	glDisable(GL_LIGHTING);
+	glColor4d(0.95, 0.95, 0.95, 0.32);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
-	double step = 1.2;
-	double ext = w + h;
-
-	glBegin(GL_LINES);
-	for (double d = -ext; d <= ext; d += step)
-	{
-		glVertex3d(-ext, d - ext, zPos);
-		glVertex3d(ext, d + ext, zPos);
-	}
-	glEnd();
-
-	glStencilFunc(GL_ALWAYS, 0, 0xFF);
-	glColor3f(0.0f, 0.0f, 0.0f);
-	glLineWidth(1.5f);
-
-	glBegin(GL_LINE_LOOP);
-	for (int i = 0; i < N; i++)
-		glVertex3d(ox[i], oy[i], zPos);
-	glEnd();
-
-	glBegin(GL_LINE_LOOP);
-	for (int i = 0; i < N; i++)
-		glVertex3d(ix[i], iy[i], zPos);
-	glEnd();
-
-	glDisable(GL_STENCIL_TEST);
-	glEnable(GL_DEPTH_TEST);
-	glLineWidth(1.0f);
+	gluSphere(g_pGluQuadObj, radius, 48, 24);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glEnable(GL_LIGHTING);
 }
 
-
-//
-// рисование осей
-//
-void DrawAxes(double dAxisSize)
+void DrawConcentricSpheres()
 {
-	glPolygonMode(GL_FRONT, GL_FILL);
-	glPolygonMode(GL_BACK, GL_LINE);
-	gluQuadricDrawStyle(g_pGluQuadObj, GLU_FILL);
-	glDisable(GL_DEPTH_TEST);
+	// Метод концентрических сфер: все вспомогательные сферы имеют общий
+	// центр в точке пересечения осей тора и цилиндра. Их радиусы подобраны
+	// так, чтобы каждая сфера пересекала обе поверхности и давала точки
+	// искомой линии пересечения.
+	const double minRadius = sqrt(g_torusMajorRadius * g_torusMajorRadius
+		+ g_torusMinorRadius * g_torusMinorRadius
+		- 2.0 * g_torusMajorRadius * g_torusMinorRadius);
+	const double maxRadius = sqrt(g_torusMajorRadius * g_torusMajorRadius
+		+ g_torusMinorRadius * g_torusMinorRadius
+		+ 2.0 * g_torusMajorRadius * g_torusMinorRadius);
 
-	glBegin(GL_LINES);
-	glColor3d(1, 0, 0);
-	glVertex3d(-dAxisSize / 2, 0, 0);
-	glVertex3d(dAxisSize, 0, 0);
-	glColor3d(0, 1, 0);
-	glVertex3d(0, -dAxisSize / 2, 0);
-	glVertex3d(0, dAxisSize, 0);
-	glColor3d(0, 0, 1);
-	glVertex3d(0, 0, -dAxisSize / 2);
-	glVertex3d(0, 0, dAxisSize);
-	glEnd();
+	for (int i = 1; i <= 5; ++i)
+	{
+		double k = i / 6.0;
+		DrawAuxiliarySphere(minRadius + (maxRadius - minRadius) * k);
+	}
+}
 
-	glPushMatrix();
-	glColor3d(1, 0, 0);
-	glTranslated(dAxisSize, 0, 0);
-	glRotated(90, 0, 1, 0);
-	gluCylinder(g_pGluQuadObj, dAxisSize / 10, 0, dAxisSize / 5, 32, 1);
-	glPopMatrix();
+void DrawIntersectionCurveBranch(int branch)
+{
+	const double R = g_torusMajorRadius;
+	const double r = g_torusMinorRadius;
+	const double rc = g_cylinderRadius;
+	const double zOffset = g_cylinderOffsetZ;
+	const int samples = 360;
+	bool inStrip = false;
 
-	glPushMatrix();
-	glColor3d(0, 1, 0);
-	glTranslated(0, dAxisSize, 0);
-	glRotated(-90, 1, 0, 0);
-	gluCylinder(g_pGluQuadObj, dAxisSize / 10, 0, dAxisSize / 5, 32, 1);
-	glPopMatrix();
+	glDisable(GL_LIGHTING);
+	glColor3d(1.0, 0.92, 0.12);
+	glLineWidth(4.0f);
 
-	glPushMatrix();
-	glColor3d(0, 0, 1);
-	glTranslated(0, 0, dAxisSize);
-	gluCylinder(g_pGluQuadObj, dAxisSize / 10, 0, dAxisSize / 5, 32, 1);
-	glPopMatrix();
+	for (int i = 0; i <= samples; ++i)
+	{
+		double v = 2.0 * M_PI * i / samples;
+		double y = r * sin(v);
+		double tubeRadius = R + r * cos(v);
+		double z2 = rc * rc - y * y;
+		bool valid = z2 >= 0.0 && tubeRadius > 0.0;
 
-}  //DrawAxes
+		if (valid)
+		{
+			double zLocal = sqrt(z2);
+			double z = zOffset;
+			double x = 0.0;
 
-//
-// рисование
-//
+			switch (branch)
+			{
+			case 0: z += zLocal; break;
+			case 1: z += zLocal; break;
+			case 2: z -= zLocal; break;
+			default: z -= zLocal; break;
+			}
+
+			double x2 = tubeRadius * tubeRadius - z * z;
+			valid = x2 >= 0.0;
+			if (valid)
+			{
+				switch (branch)
+				{
+				case 0:
+				case 2:
+					x = sqrt(x2);
+					break;
+				default:
+					x = -sqrt(x2);
+					break;
+				}
+
+				if (!inStrip)
+				{
+					glBegin(GL_LINE_STRIP);
+					inStrip = true;
+				}
+				glVertex3d(x, y, z);
+			}
+		}
+
+		if (!valid && inStrip)
+		{
+			glEnd();
+			inStrip = false;
+		}
+	}
+
+	if (inStrip)
+		glEnd();
+
+	glLineWidth(1.0f);
+	glEnable(GL_LIGHTING);
+}
+
+void DrawIntersectionCurves()
+{
+	for (int branch = 0; branch < 4; ++branch)
+		DrawIntersectionCurveBranch(branch);
+}
+
+void SetupLighting()
+{
+	GLfloat light0Pos[] = { -12.0f, 12.0f, 14.0f, 1.0f };
+	GLfloat light1Pos[] = { 10.0f, -8.0f, -6.0f, 1.0f };
+	GLfloat light0Diffuse[] = { 1.0f, 0.98f, 0.94f, 1.0f };
+	GLfloat light1Diffuse[] = { 0.38f, 0.42f, 0.55f, 1.0f };
+	GLfloat ambient[] = { 0.42f, 0.42f, 0.42f, 1.0f };
+
+	glEnable(GL_LIGHTING);
+	glEnable(GL_LIGHT0);
+	glEnable(GL_LIGHT1);
+	glLightfv(GL_LIGHT0, GL_POSITION, light0Pos);
+	glLightfv(GL_LIGHT0, GL_DIFFUSE, light0Diffuse);
+	glLightfv(GL_LIGHT1, GL_POSITION, light1Pos);
+	glLightfv(GL_LIGHT1, GL_DIFFUSE, light1Diffuse);
+	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+}
+
 void Draw()
 {
-	double maxWH = g_boxpipeProps.W;
-	if (maxWH < g_boxpipeProps.H)
-		maxWH = g_boxpipeProps.H;
+	glViewport(0, 0, g_wndWidth, g_wndHeight);
 
-	double minWHL = g_boxpipeProps.W;
-	if (minWHL > g_boxpipeProps.H)
-		minWHL = g_boxpipeProps.H;
-	if (minWHL > g_boxpipeProps.L)
-		minWHL = g_boxpipeProps.L;
-
-	double maxWHL = g_boxpipeProps.L;
-	if (maxWHL < g_boxpipeProps.W)
-		maxWHL = g_boxpipeProps.W;
-	if (maxWHL < g_boxpipeProps.H)
-		maxWHL = g_boxpipeProps.H;
-
-	double l = g_boxpipeProps.L / 2;
-
-	GLsizei viewportSize = g_wndHeight;
-
-	glViewport(0, 0, viewportSize, viewportSize);
-
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_NORMALIZE);
+	glShadeModel(GL_SMOOTH);
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-
-	glOrtho(-g_sceneWidth / 2, g_sceneWidth / 2,
-		-g_sceneWidth / 2, g_sceneWidth / 2,
-		-g_sceneWidth / 2, g_sceneWidth / 2);
+	double aspect = g_wndHeight > 0 ? (double)g_wndWidth / (double)g_wndHeight : 1.0;
+	gluPerspective(42.0, aspect, 1.0, 100.0);
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
+	double yawRad = g_cameraYaw * M_PI / 180.0;
+	double pitchRad = g_cameraPitch * M_PI / 180.0;
+	double cameraX = g_cameraDistance * cos(pitchRad) * cos(yawRad);
+	double cameraY = g_cameraDistance * sin(pitchRad);
+	double cameraZ = g_cameraDistance * cos(pitchRad) * sin(yawRad);
+	gluLookAt(cameraX, cameraY, cameraZ, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 
-	// ── Главный 3D вид с штриховкой на обоих торцах ───────────────────
-	glPushMatrix();
+	SetupLighting();
 
-	glRotated(30., 1., 0., 0.);
-	glRotated(g_angle, 0., 1., 0.);
+	glRotated(16.0, 1.0, 0.0, 0.0);
+	glRotated(-26.0, 0.0, 1.0, 0.0);
+	glRotated(-34.0, 0.0, 0.0, 1.0);
 
-	DrawBoxpipe();
-
-	// штриховка на переднем торце (+l)
-	DrawHatching(l);
-	// штриховка на заднем торце (-l)
-	DrawHatching(-l);
-
-	DrawAxes(minWHL / 2);
-
-	glPopMatrix();
-
-	glViewport(viewportSize, 0, viewportSize, viewportSize);
-
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-
-	double gap = maxWH / 10,
-		size = maxWH + maxWHL + gap;
-
-	double scw2 = size / 2 * 1.2;
-	glOrtho(-scw2, scw2, -scw2, scw2, -scw2, scw2);
-
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-
-	double _05size = size / 2,
-		_05maxWH = maxWH / 2,
-		_05L = maxWHL / 2;
-
-	// ── Проекция 1: вид спереди (торец) — штриховка в z=0 ────────────
-	glPushMatrix();
-	glTranslated(-_05size + _05maxWH, _05size - _05maxWH, 0.);
-	DrawBoxpipe();
-	DrawHatching(0.0);
-	DrawAxes(minWHL / 2);
-	glPopMatrix();
-
-	// ── Проекция 2: вид сбоку ─────────────────────────────────────────
-	glPushMatrix();
-	glTranslated(-_05size + _05maxWH, _05size - maxWH - _05L - gap, 0.);
-	glRotated(90., 1., 0., 0.);
-	DrawBoxpipe();
-	DrawAxes(minWHL / 2);
-	glPopMatrix();
-
-	// ── Проекция 3: вид сверху ────────────────────────────────────────
-	glPushMatrix();
-	glTranslated(-_05size + maxWH + _05L + gap, _05size - _05maxWH, 0.);
-	glRotated(90., 0., 1., 0.);
-	DrawBoxpipe();
-	DrawAxes(minWHL / 2);
-	glPopMatrix();
-
-	// ── Проекция 4: аксонометрия (wireframe) ──────────────────────────
-	glPushMatrix();
-	glTranslated(-_05size + maxWH + _05L + gap, _05size - maxWH - _05L - gap, 0.);
-	glRotated(30., 1., 0., 0.);
-	glRotated(int(g_angle / 22.5) * 22.5, 0, -1., 0.);
-	glScaled(0.7, 0.7, 0.7);
-	DrawBoxpipe(false);
-	DrawAxes(minWHL * 0.7 / 2);
-	glPopMatrix();
+	if (g_showAuxiliarySpheres)
+		DrawConcentricSpheres();
+	DrawTorus();
+	DrawCylinder();
+	DrawIntersectionCurves();
 
 	glFinish();
 	SwapBuffers(g_hDC);
-}  //Draw
-
+}
 
 LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
 	case WM_CREATE:
-		return MainOnCreate(hwnd, (LPCREATESTRUCT)lParam);
+		g_hDC = GetDC(hwnd);
+		if (!SetupPixelFormat(g_hDC))
+			return -1;
+
+		g_hGLRC = wglCreateContext(g_hDC);
+		wglMakeCurrent(g_hDC, g_hGLRC);
+
+		g_pGluQuadObj = gluNewQuadric();
+		assert(g_pGluQuadObj);
+		gluQuadricNormals(g_pGluQuadObj, GLU_SMOOTH);
+		gluQuadricDrawStyle(g_pGluQuadObj, GLU_FILL);
+
+		return 0;
 
 	case WM_SIZE:
-		return MainOnSize(LOWORD(lParam), HIWORD(lParam));
+		g_wndWidth = LOWORD(lParam);
+		g_wndHeight = HIWORD(lParam);
+		InvalidateRect(hwnd, nullptr, FALSE);
+		return 0;
 
 	case WM_PAINT:
-		return MainOnPaint();
+	{
+		PAINTSTRUCT ps;
+		BeginPaint(hwnd, &ps);
+		Draw();
+		EndPaint(hwnd, &ps);
+		return 0;
+	}
+
+	case WM_LBUTTONDOWN:
+		g_isLeftMouseDown = true;
+		g_lastMousePos.x = (short)LOWORD(lParam);
+		g_lastMousePos.y = (short)HIWORD(lParam);
+		SetCapture(hwnd);
+		return 0;
+
+	case WM_MOUSEMOVE:
+		if (g_isLeftMouseDown)
+		{
+			int mouseX = (short)LOWORD(lParam);
+			int mouseY = (short)HIWORD(lParam);
+			int deltaX = mouseX - g_lastMousePos.x;
+			int deltaY = mouseY - g_lastMousePos.y;
+
+			g_cameraYaw += deltaX * 0.45;
+			g_cameraPitch = Clamp(g_cameraPitch - deltaY * 0.35, -80.0, 80.0);
+
+			g_lastMousePos.x = mouseX;
+			g_lastMousePos.y = mouseY;
+			InvalidateRect(hwnd, nullptr, FALSE);
+		}
+		return 0;
+
+	case WM_LBUTTONUP:
+		if (g_isLeftMouseDown)
+		{
+			g_isLeftMouseDown = false;
+			ReleaseCapture();
+		}
+		return 0;
+
+	case WM_KEYDOWN:
+		if (wParam == 'E' || wParam == 'e')
+		{
+			g_showAuxiliarySpheres = !g_showAuxiliarySpheres;
+			InvalidateRect(hwnd, nullptr, FALSE);
+			return 0;
+		}
+
+		InvalidateRect(hwnd, nullptr, FALSE);
+		break;
 
 	case WM_DESTROY:
-		return MainOnDestroy();
-
-	case WM_TIMER:
-		if ((g_angle = g_angle + g_angIncr) >= 360)
-			g_angle -= 360;
-		InvalidateRect(g_hWindow, nullptr, FALSE);
-		break;
-
-	default:
-		return DefWindowProc(hwnd, msg, wParam, lParam);
-	}
-	return 0L;
-}  //MainWindowProc
-
-//
-// WM_CREATE
-//
-BOOL MainOnCreate(HWND hwnd, LPCREATESTRUCT p_cs)
-{
-	g_hDC = GetDC(hwnd);
-
-	SetPixelFormat(g_hDC);
-
-	g_hGLRC = wglCreateContext(g_hDC);
-	wglMakeCurrent(g_hDC, g_hGLRC);
-
-	SetTimer(hwnd, 0, 10, 0);
-
-	g_pGluQuadObj = gluNewQuadric();
-	assert(g_pGluQuadObj);
-
-	CreateDialog(g_hApp, MAKEINTRESOURCE(IDD_PROPS), hwnd, DlgProc);
-
-	return TRUE;
-}  //MainOnCreate
-
-//
-// WM_SIZE
-//
-BOOL MainOnSize(int width, int height)
-{
-	g_wndWidth = width;
-	g_wndHeight = height;
-	return TRUE;
-}
-
-//
-// WM_PAINT
-//
-BOOL MainOnPaint()
-{
-	PAINTSTRUCT ps;
-	HDC hdc = BeginPaint(g_hWindow, &ps);
-	Draw();
-	EndPaint(g_hWindow, &ps);
-	return TRUE;
-}
-
-
-BOOL MainOnDestroy()
-{
-	gluDeleteQuadric(g_pGluQuadObj);
-	g_pGluQuadObj = nullptr;
-
-	wglMakeCurrent(nullptr, nullptr);
-	if (g_hGLRC)
-		wglDeleteContext(g_hGLRC);
-
-	PostQuitMessage(0);
-
-	return TRUE;
-}
-
-
-void SetDlgItemReal(HWND hDlg, int id, double val)
-{
-	TCHAR buff[256];
-	_stprintf(buff, _T("%g"), val);
-	SetDlgItemText(hDlg, id, buff);
-}
-
-bool GetDlgItemReal(HWND hDlg, int id, double& val)
-{
-	TCHAR buff[512];
-	GetDlgItemText(hDlg, id, buff, _countof(buff));
-
-	LPTSTR err = nullptr;
-	val = _tcstod(buff, &err);
-	return nullptr == err;
-}
-
-INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	static bool s_fInit;
-
-	switch (message)
-	{
-	case WM_INITDIALOG:
-	{
-		s_fInit = true;
-
-		SetDlgItemReal(hDlg, IDC_ED_W, g_boxpipeProps.W);
-		SetDlgItemReal(hDlg, IDC_ED_H, g_boxpipeProps.H);
-		SetDlgItemReal(hDlg, IDC_ED_T, g_boxpipeProps.T);
-		SetDlgItemReal(hDlg, IDC_ED_L, g_boxpipeProps.L);
-		SetDlgItemReal(hDlg, IDC_ED_C, g_boxpipeProps.C);
-
-		for (int i = 0; i < _countof(g_colors); i++)
-			SendDlgItemMessage(hDlg, IDC_LB_COLORS, LB_ADDSTRING, 0, (LPARAM)g_colors[i].szName);
-
-		SendDlgItemMessage(hDlg, IDC_LB_COLORS, LB_SETCURSEL, g_boxpipeProps.iColor, 0);
-
-		s_fInit = false;
-	}
-	return (INT_PTR)TRUE;
-
-	case WM_COMMAND:
-	{
-		if (s_fInit)
-			return (INT_PTR)FALSE;
-
-		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+		if (g_pGluQuadObj)
 		{
-			EndDialog(hDlg, LOWORD(wParam));
-			return (INT_PTR)TRUE;
+			gluDeleteQuadric(g_pGluQuadObj);
+			g_pGluQuadObj = nullptr;
 		}
-
-		if (HIWORD(wParam) == EN_CHANGE
-			|| HIWORD(wParam) == LBN_SELCHANGE)
+		wglMakeCurrent(nullptr, nullptr);
+		if (g_hGLRC)
 		{
-			GetDlgItemReal(hDlg, IDC_ED_W, g_boxpipeProps.W);
-			GetDlgItemReal(hDlg, IDC_ED_H, g_boxpipeProps.H);
-			GetDlgItemReal(hDlg, IDC_ED_T, g_boxpipeProps.T);
-			GetDlgItemReal(hDlg, IDC_ED_L, g_boxpipeProps.L);
-			GetDlgItemReal(hDlg, IDC_ED_C, g_boxpipeProps.C);
-
-			g_boxpipeProps.iColor = SendDlgItemMessage(hDlg, IDC_LB_COLORS, LB_GETCURSEL, 0, 0);
-
-			g_boxpipeProps.CorrectValues();
-
-			InvalidateRect(g_hWindow, nullptr, FALSE);
+			wglDeleteContext(g_hGLRC);
+			g_hGLRC = nullptr;
 		}
+		if (g_hDC)
+		{
+			ReleaseDC(hwnd, g_hDC);
+			g_hDC = nullptr;
+		}
+		PostQuitMessage(0);
+		return 0;
 	}
-	break;
 
-	case WM_CLOSE:
-		DestroyWindow(g_hWindow);
-		break;
-	}
-	return (INT_PTR)FALSE;
+	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
-
 
 BOOL InitApp()
 {
 	WNDCLASSEX wce;
-	ZeroMemory(&wce, sizeof(WNDCLASSEX));
-	wce.cbSize = sizeof(WNDCLASSEX);
+	ZeroMemory(&wce, sizeof(wce));
+	wce.cbSize = sizeof(wce);
 	wce.hInstance = g_hApp;
 	wce.style = CS_VREDRAW | CS_HREDRAW | CS_OWNDC;
 	wce.lpfnWndProc = MainWindowProc;
 	wce.hCursor = LoadCursor(nullptr, IDC_ARROW);
+	wce.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
 	wce.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
 	wce.lpszClassName = g_szWndClass;
+
 	if (!RegisterClassEx(&wce))
 		return FALSE;
 
-	SetLastError(0);
-	g_hWindow = CreateWindow(g_szWndClass, g_szTitle,
-		WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
-		| WS_THICKFRAME | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-		50, 50, 900, 400, nullptr, nullptr, g_hApp, nullptr);
+	g_hWindow = CreateWindow(
+		g_szWndClass,
+		g_szAppName,
+		WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		1000, 700,
+		nullptr, nullptr, g_hApp, nullptr);
+
 	if (!g_hWindow)
-	{
-		DWORD err = GetLastError();
 		return FALSE;
-	}
 
 	ShowWindow(g_hWindow, SW_SHOW);
 	UpdateWindow(g_hWindow);
-
 	return TRUE;
 }
-
 
 void UninitApp()
 {
 	UnregisterClass(g_szWndClass, g_hApp);
 }
 
-
-int APIENTRY WinMain(HINSTANCE hApp_, HINSTANCE, LPSTR, int)
+int APIENTRY WinMain(HINSTANCE hApp, HINSTANCE, LPSTR, int)
 {
-	g_hApp = hApp_;
+	g_hApp = hApp;
 
 	if (InitApp())
 	{
@@ -699,7 +488,6 @@ int APIENTRY WinMain(HINSTANCE hApp_, HINSTANCE, LPSTR, int)
 	}
 
 	UninitApp();
-
 	return 0;
 }
 
