@@ -37,17 +37,33 @@ GLUquadricObj* g_pGluQuadObj = nullptr;
 
 int g_wndWidth = 1000;
 int g_wndHeight = 700;
-double g_angle = 0.0;
+bool g_showAuxiliarySpheres = true;
+bool g_isLeftMouseDown = false;
+POINT g_lastMousePos = { 0, 0 };
+
+double g_cameraYaw = -38.0;
+double g_cameraPitch = 24.0;
+double g_cameraDistance = 30.0;
 
 const double g_torusMajorRadius = 7.0;
 const double g_torusMinorRadius = 2.45;
 const double g_cylinderRadius = 2.85;
 const double g_cylinderLength = 20.0;
+const double g_cylinderOffsetZ = g_torusMajorRadius + 0.3;
 
 LRESULT CALLBACK MainWindowProc(HWND, UINT, WPARAM, LPARAM);
 BOOL InitApp();
 void UninitApp();
 void Draw();
+
+double Clamp(double value, double minValue, double maxValue)
+{
+	if (value < minValue)
+		return minValue;
+	if (value > maxValue)
+		return maxValue;
+	return value;
+}
 
 BOOL SetupPixelFormat(HDC dc)
 {
@@ -72,9 +88,9 @@ BOOL SetupPixelFormat(HDC dc)
 
 void SetMaterial(float r, float g, float b, float shininess)
 {
-	GLfloat ambient[] = { r * 0.25f, g * 0.25f, b * 0.25f, 1.0f };
+	GLfloat ambient[] = { r * 0.42f, g * 0.42f, b * 0.42f, 1.0f };
 	GLfloat diffuse[] = { r, g, b, 1.0f };
-	GLfloat specular[] = { 0.55f, 0.55f, 0.55f, 1.0f };
+	GLfloat specular[] = { 0.35f, 0.35f, 0.35f, 1.0f };
 
 	glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambient);
 	glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diffuse);
@@ -142,6 +158,7 @@ void DrawCylinder()
 	SetMaterial(0.55f, 0.08f, 0.05f, 42.0f);
 
 	glPushMatrix();
+	glTranslated(0.0, 0.0, g_cylinderOffsetZ);
 	glTranslated(-halfLength, 0.0, 0.0);
 	glRotated(90.0, 0.0, 1.0, 0.0);
 	gluCylinder(g_pGluQuadObj, g_cylinderRadius, g_cylinderRadius, g_cylinderLength, 64, 10);
@@ -186,6 +203,7 @@ void DrawIntersectionCurveBranch(int branch)
 	const double R = g_torusMajorRadius;
 	const double r = g_torusMinorRadius;
 	const double rc = g_cylinderRadius;
+	const double zOffset = g_cylinderOffsetZ;
 	const int samples = 360;
 	bool inStrip = false;
 
@@ -203,23 +221,32 @@ void DrawIntersectionCurveBranch(int branch)
 
 		if (valid)
 		{
-			double zAbs = sqrt(z2);
-			double s = zAbs / tubeRadius;
-			valid = s <= 1.0;
+			double zLocal = sqrt(z2);
+			double z = zOffset;
+			double x = 0.0;
+
+			switch (branch)
+			{
+			case 0: z += zLocal; break;
+			case 1: z += zLocal; break;
+			case 2: z -= zLocal; break;
+			default: z -= zLocal; break;
+			}
+
+			double x2 = tubeRadius * tubeRadius - z * z;
+			valid = x2 >= 0.0;
 			if (valid)
 			{
-				double uBase = asin(s);
-				double u = 0.0;
 				switch (branch)
 				{
-				case 0: u = uBase; break;
-				case 1: u = M_PI - uBase; break;
-				case 2: u = M_PI + uBase; break;
-				default: u = 2.0 * M_PI - uBase; break;
+				case 0:
+				case 2:
+					x = sqrt(x2);
+					break;
+				default:
+					x = -sqrt(x2);
+					break;
 				}
-
-				double x = tubeRadius * cos(u);
-				double z = tubeRadius * sin(u);
 
 				if (!inStrip)
 				{
@@ -254,9 +281,9 @@ void SetupLighting()
 {
 	GLfloat light0Pos[] = { -12.0f, 12.0f, 14.0f, 1.0f };
 	GLfloat light1Pos[] = { 10.0f, -8.0f, -6.0f, 1.0f };
-	GLfloat light0Diffuse[] = { 1.0f, 0.96f, 0.9f, 1.0f };
-	GLfloat light1Diffuse[] = { 0.35f, 0.45f, 0.65f, 1.0f };
-	GLfloat ambient[] = { 0.18f, 0.18f, 0.18f, 1.0f };
+	GLfloat light0Diffuse[] = { 0.92f, 0.9f, 0.86f, 1.0f };
+	GLfloat light1Diffuse[] = { 0.25f, 0.3f, 0.42f, 1.0f };
+	GLfloat ambient[] = { 0.28f, 0.28f, 0.28f, 1.0f };
 
 	glEnable(GL_LIGHTING);
 	glEnable(GL_LIGHT0);
@@ -270,10 +297,9 @@ void SetupLighting()
 
 void Draw()
 {
-	int side = g_wndWidth < g_wndHeight ? g_wndWidth : g_wndHeight;
-	glViewport((g_wndWidth - side) / 2, (g_wndHeight - side) / 2, side, side);
+	glViewport(0, 0, g_wndWidth, g_wndHeight);
 
-	glClearColor(0.93f, 0.95f, 0.95f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_NORMALIZE);
@@ -281,19 +307,26 @@ void Draw()
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluPerspective(42.0, 1.0, 1.0, 100.0);
+	double aspect = g_wndHeight > 0 ? (double)g_wndWidth / (double)g_wndHeight : 1.0;
+	gluPerspective(42.0, aspect, 1.0, 100.0);
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
-	gluLookAt(0.0, 10.5, 27.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+	double yawRad = g_cameraYaw * M_PI / 180.0;
+	double pitchRad = g_cameraPitch * M_PI / 180.0;
+	double cameraX = g_cameraDistance * cos(pitchRad) * cos(yawRad);
+	double cameraY = g_cameraDistance * sin(pitchRad);
+	double cameraZ = g_cameraDistance * cos(pitchRad) * sin(yawRad);
+	gluLookAt(cameraX, cameraY, cameraZ, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 
 	SetupLighting();
 
-	glRotated(18.0, 1.0, 0.0, 0.0);
-	glRotated(g_angle, 0.0, 1.0, 0.0);
-	glRotated(-28.0, 0.0, 0.0, 1.0);
+	glRotated(16.0, 1.0, 0.0, 0.0);
+	glRotated(-26.0, 0.0, 1.0, 0.0);
+	glRotated(-34.0, 0.0, 0.0, 1.0);
 
-	DrawConcentricSpheres();
+	if (g_showAuxiliarySpheres)
+		DrawConcentricSpheres();
 	DrawTorus();
 	DrawCylinder();
 	DrawIntersectionCurves();
@@ -320,12 +353,12 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 		gluQuadricNormals(g_pGluQuadObj, GLU_SMOOTH);
 		gluQuadricDrawStyle(g_pGluQuadObj, GLU_FILL);
 
-		SetTimer(hwnd, 1, 30, nullptr);
 		return 0;
 
 	case WM_SIZE:
 		g_wndWidth = LOWORD(lParam);
 		g_wndHeight = HIWORD(lParam);
+		InvalidateRect(hwnd, nullptr, FALSE);
 		return 0;
 
 	case WM_PAINT:
@@ -337,15 +370,50 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 		return 0;
 	}
 
-	case WM_TIMER:
-		g_angle += 0.8;
-		if (g_angle >= 360.0)
-			g_angle -= 360.0;
-		InvalidateRect(hwnd, nullptr, FALSE);
+	case WM_LBUTTONDOWN:
+		g_isLeftMouseDown = true;
+		g_lastMousePos.x = (short)LOWORD(lParam);
+		g_lastMousePos.y = (short)HIWORD(lParam);
+		SetCapture(hwnd);
 		return 0;
 
+	case WM_MOUSEMOVE:
+		if (g_isLeftMouseDown)
+		{
+			int mouseX = (short)LOWORD(lParam);
+			int mouseY = (short)HIWORD(lParam);
+			int deltaX = mouseX - g_lastMousePos.x;
+			int deltaY = mouseY - g_lastMousePos.y;
+
+			g_cameraYaw += deltaX * 0.45;
+			g_cameraPitch = Clamp(g_cameraPitch - deltaY * 0.35, -80.0, 80.0);
+
+			g_lastMousePos.x = mouseX;
+			g_lastMousePos.y = mouseY;
+			InvalidateRect(hwnd, nullptr, FALSE);
+		}
+		return 0;
+
+	case WM_LBUTTONUP:
+		if (g_isLeftMouseDown)
+		{
+			g_isLeftMouseDown = false;
+			ReleaseCapture();
+		}
+		return 0;
+
+	case WM_KEYDOWN:
+		if (wParam == 'E' || wParam == 'e')
+		{
+			g_showAuxiliarySpheres = !g_showAuxiliarySpheres;
+			InvalidateRect(hwnd, nullptr, FALSE);
+			return 0;
+		}
+
+		InvalidateRect(hwnd, nullptr, FALSE);
+		break;
+
 	case WM_DESTROY:
-		KillTimer(hwnd, 1);
 		if (g_pGluQuadObj)
 		{
 			gluDeleteQuadric(g_pGluQuadObj);
