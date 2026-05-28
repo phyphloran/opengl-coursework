@@ -1,0 +1,27 @@
+# Visual Studio user state and caches
+.vs/
+*.user
+*.suo
+*.wsuo
+*.VC.db
+*.VC.opendb
+*.vsidx
+*.ipch
+
+# Build outputs
+Debug/
+Release/
+x64/
+Win32/
+[Bb]uild/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.recipe
+*.res
+*.tlog
+*.log
+
+# Temporary resource/compiler files
+RCa*
