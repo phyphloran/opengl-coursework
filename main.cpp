@@ -88,9 +88,9 @@ BOOL SetupPixelFormat(HDC dc)
 
 void SetMaterial(float r, float g, float b, float shininess)
 {
-	GLfloat ambient[] = { r * 0.42f, g * 0.42f, b * 0.42f, 1.0f };
+	GLfloat ambient[] = { r * 0.58f, g * 0.58f, b * 0.58f, 1.0f };
 	GLfloat diffuse[] = { r, g, b, 1.0f };
-	GLfloat specular[] = { 0.35f, 0.35f, 0.35f, 1.0f };
+	GLfloat specular[] = { 0.28f, 0.28f, 0.28f, 1.0f };
 
 	glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambient);
 	glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diffuse);
@@ -281,9 +281,9 @@ void SetupLighting()
 {
 	GLfloat light0Pos[] = { -12.0f, 12.0f, 14.0f, 1.0f };
 	GLfloat light1Pos[] = { 10.0f, -8.0f, -6.0f, 1.0f };
-	GLfloat light0Diffuse[] = { 0.92f, 0.9f, 0.86f, 1.0f };
-	GLfloat light1Diffuse[] = { 0.25f, 0.3f, 0.42f, 1.0f };
-	GLfloat ambient[] = { 0.28f, 0.28f, 0.28f, 1.0f };
+	GLfloat light0Diffuse[] = { 1.0f, 0.98f, 0.94f, 1.0f };
+	GLfloat light1Diffuse[] = { 0.38f, 0.42f, 0.55f, 1.0f };
+	GLfloat ambient[] = { 0.42f, 0.42f, 0.42f, 1.0f };
 
 	glEnable(GL_LIGHTING);
 	glEnable(GL_LIGHT0);
@@ -330,7 +330,6 @@ void Draw()
 	DrawTorus();
 	DrawCylinder();
 	DrawIntersectionCurves();
-	DrawAxes(11.0);
 
 	glFinish();
 	SwapBuffers(g_hDC);
