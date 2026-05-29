@@ -3,8 +3,8 @@
 //////////////////////////////////////////
 //                                      //
 // Учебные приложения по графике OpenGL //
-// Цилиндр и тор. Метод концентрических //
-// сфер                                //
+// Цилиндр и тор. Метод пересечения     //
+// плоскостей                           //
 //                                      //
 //////////////////////////////////////////
 
@@ -27,8 +27,8 @@
 #endif
 
 HINSTANCE g_hApp = nullptr;
-LPCTSTR g_szAppName = _T("Цилиндр и тор. Метод концентрических сфер");
-LPCTSTR g_szWndClass = _T("WcOglCylinderTorusSpheres");
+LPCTSTR g_szAppName = _T("Цилиндр и тор. Метод пересечения плоскостей");
+LPCTSTR g_szWndClass = _T("WcOglCylinderTorusPlanes");
 
 HWND g_hWindow = nullptr;
 HDC g_hDC = nullptr;
@@ -37,7 +37,7 @@ GLUquadricObj* g_pGluQuadObj = nullptr;
 
 int g_wndWidth = 1000;
 int g_wndHeight = 700;
-bool g_showAuxiliarySpheres = true;
+bool g_showAuxiliaryPlanes = true;
 bool g_isLeftMouseDown = false;
 POINT g_lastMousePos = { 0, 0 };
 
@@ -98,25 +98,6 @@ void SetMaterial(float r, float g, float b, float shininess)
 	glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, shininess);
 }
 
-void DrawAxes(double size)
-{
-	glDisable(GL_LIGHTING);
-	glLineWidth(2.0f);
-	glBegin(GL_LINES);
-	glColor3d(1.0, 0.15, 0.15);
-	glVertex3d(-size, 0.0, 0.0);
-	glVertex3d(size, 0.0, 0.0);
-	glColor3d(0.1, 0.85, 0.1);
-	glVertex3d(0.0, -size, 0.0);
-	glVertex3d(0.0, size, 0.0);
-	glColor3d(0.15, 0.25, 1.0);
-	glVertex3d(0.0, 0.0, -size);
-	glVertex3d(0.0, 0.0, size);
-	glEnd();
-	glLineWidth(1.0f);
-	glEnable(GL_LIGHTING);
-}
-
 void DrawTorus()
 {
 	const int uSteps = 96;
@@ -168,38 +149,58 @@ void DrawCylinder()
 	glPopMatrix();
 }
 
-void DrawAuxiliarySphere(double radius)
+void DrawAuxiliaryPlane(double y)
 {
 	glDisable(GL_LIGHTING);
-	glColor4d(0.95, 0.95, 0.95, 0.32);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	gluSphere(g_pGluQuadObj, radius, 48, 24);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	const double planeHalfSize = 12.5;
+	glColor4d(0.72, 0.78, 0.95, 0.10);
+	glBegin(GL_QUADS);
+	glVertex3d(-planeHalfSize, y, -planeHalfSize);
+	glVertex3d(planeHalfSize, y, -planeHalfSize);
+	glVertex3d(planeHalfSize, y, planeHalfSize);
+	glVertex3d(-planeHalfSize, y, planeHalfSize);
+	glEnd();
+
+	glColor4d(0.75, 0.82, 1.0, 0.45);
+	glLineWidth(1.5f);
+	glBegin(GL_LINE_LOOP);
+	glVertex3d(-planeHalfSize, y, -planeHalfSize);
+	glVertex3d(planeHalfSize, y, -planeHalfSize);
+	glVertex3d(planeHalfSize, y, planeHalfSize);
+	glVertex3d(-planeHalfSize, y, planeHalfSize);
+	glEnd();
+	glLineWidth(1.0f);
+
+	glDisable(GL_BLEND);
 	glEnable(GL_LIGHTING);
 }
 
-void DrawConcentricSpheres()
+void DrawIntersectingPlanes()
 {
-	// Метод концентрических сфер: все вспомогательные сферы имеют общий
-	// центр в точке пересечения осей тора и цилиндра. Их радиусы подобраны
-	// так, чтобы каждая сфера пересекала обе поверхности и давала точки
-	// искомой линии пересечения.
-	const double minRadius = sqrt(g_torusMajorRadius * g_torusMajorRadius
-		+ g_torusMinorRadius * g_torusMinorRadius
-		- 2.0 * g_torusMajorRadius * g_torusMinorRadius);
-	const double maxRadius = sqrt(g_torusMajorRadius * g_torusMajorRadius
-		+ g_torusMinorRadius * g_torusMinorRadius
-		+ 2.0 * g_torusMajorRadius * g_torusMinorRadius);
+	// Метод пересечения плоскостей: берем набор горизонтальных плоскостей
+	// y = const. Каждая такая плоскость пересекает цилиндр по двум прямым,
+	// а тор — по одной или двум окружностям. Точки пересечения этих сечений
+	// образуют искомую пространственную кривую.
+	const int planeCount = 5;
+	const double yMin = -g_torusMinorRadius * 0.9;
+	const double yMax = g_torusMinorRadius * 0.9;
 
-	for (int i = 1; i <= 5; ++i)
+	for (int i = 0; i < planeCount; ++i)
 	{
-		double k = i / 6.0;
-		DrawAuxiliarySphere(minRadius + (maxRadius - minRadius) * k);
+		double t = planeCount > 1 ? (double)i / (planeCount - 1) : 0.5;
+		double y = yMin + (yMax - yMin) * t;
+		DrawAuxiliaryPlane(y);
 	}
 }
 
 void DrawIntersectionCurveBranch(int branch)
 {
+	// Та же идея метода пересечения плоскостей y = const используется и
+	// здесь: для каждого уровня y находим пересечение сечения цилиндра
+	// z = z0 +/- sqrt(rc^2 - y^2) с соответствующим сечением тора.
 	const double R = g_torusMajorRadius;
 	const double r = g_torusMinorRadius;
 	const double rc = g_cylinderRadius;
@@ -325,8 +326,8 @@ void Draw()
 	glRotated(-26.0, 0.0, 1.0, 0.0);
 	glRotated(-34.0, 0.0, 0.0, 1.0);
 
-	if (g_showAuxiliarySpheres)
-		DrawConcentricSpheres();
+	if (g_showAuxiliaryPlanes)
+		DrawIntersectingPlanes();
 	DrawTorus();
 	DrawCylinder();
 	DrawIntersectionCurves();
@@ -404,7 +405,7 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 	case WM_KEYDOWN:
 		if (wParam == 'E' || wParam == 'e')
 		{
-			g_showAuxiliarySpheres = !g_showAuxiliarySpheres;
+			g_showAuxiliaryPlanes = !g_showAuxiliaryPlanes;
 			InvalidateRect(hwnd, nullptr, FALSE);
 			return 0;
 		}
